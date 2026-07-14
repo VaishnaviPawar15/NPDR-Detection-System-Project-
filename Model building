@@ -1,0 +1,248 @@
+import zipfile
+
+zip_path = "/content/dataset_split.zip"
+extract_path = "/content/dataset"
+
+with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+    zip_ref.extractall(extract_path)
+
+print("✅ Extracted successfully!")
+
+# =========================
+# 2. BALANCE TRAIN DATASET
+# =========================
+import os
+import random
+import shutil
+from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img, img_to_array, save_img
+import numpy as np
+
+input_dir = "/content/dataset/dataset_split/train"
+output_dir = "/content/dataset_balanced/train"
+
+target_count = 600
+
+os.makedirs(output_dir, exist_ok=True)
+
+classes = os.listdir(input_dir)
+
+for cls in classes:
+    class_path = os.path.join(input_dir, cls)
+    output_class_path = os.path.join(output_dir, cls)
+
+    os.makedirs(output_class_path, exist_ok=True)
+
+    images = [img for img in os.listdir(class_path)
+              if img.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+    count = len(images)
+    print(f"{cls}: {count} images")
+
+    # Undersampling
+    if count > target_count:
+        selected = random.sample(images, target_count)
+
+        for img in selected:
+            shutil.copy(os.path.join(class_path, img),
+                        os.path.join(output_class_path, img))
+
+    # Augmentation
+    else:
+        for img in images:
+            shutil.copy(os.path.join(class_path, img),
+                        os.path.join(output_class_path, img))
+
+        datagen = ImageDataGenerator(
+            rotation_range=20,
+            zoom_range=0.2,
+            horizontal_flip=True,
+            brightness_range=[0.8, 1.2]
+        )
+
+        needed = target_count - count
+        i = 0
+
+        while i < needed:
+            img_name = random.choice(images)
+            img_path = os.path.join(class_path, img_name)
+
+            img = load_img(img_path)
+            x = img_to_array(img)
+            x = np.expand_dims(x, axis=0)
+
+            for batch in datagen.flow(x, batch_size=1):
+                new_img_name = f"aug_{cls}_{i}.jpg"
+                save_img(os.path.join(output_class_path, new_img_name), batch[0])
+                i += 1
+                if i >= needed:
+                    break
+
+print("✅ Dataset Balanced Successfully!")
+
+# =========================
+# 3. VERIFY BALANCED DATA
+# =========================
+print("\n📊 Balanced Dataset:")
+for cls in os.listdir(output_dir):
+    print(cls, len(os.listdir(os.path.join(output_dir, cls))))
+# =========================
+# 1. IMPORT LIBRARIES
+# =========================
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# =========================
+# 2. PATHS
+# =========================
+train_dir = "/content/dataset_balanced/train"
+val_dir = "/content/dataset/dataset_split/val"
+test_dir = "/content/dataset/dataset_split/test"
+
+IMG_SIZE = 224
+BATCH_SIZE = 32
+
+# =========================
+# 3. DATA GENERATORS
+# =========================
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=20,
+    zoom_range=0.2,
+    horizontal_flip=True
+)
+
+val_test_datagen = ImageDataGenerator(rescale=1./255)
+
+train_gen = train_datagen.flow_from_directory(
+    train_dir,
+    target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    class_mode='categorical'
+)
+
+val_gen = val_test_datagen.flow_from_directory(
+    val_dir,
+    target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    class_mode='categorical'
+)
+
+test_gen = val_test_datagen.flow_from_directory(
+    test_dir,
+    target_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    class_mode='categorical',
+    shuffle=False
+)
+
+NUM_CLASSES = train_gen.num_classes
+
+# =========================
+# 4. LOAD VGG16 MODEL
+# =========================
+base_model = tf.keras.applications.VGG16(
+    weights='imagenet',
+    include_top=False,
+    input_shape=(IMG_SIZE, IMG_SIZE, 3)
+)
+
+# Freeze base layers
+for layer in base_model.layers:
+    layer.trainable = False
+
+# =========================
+# 5. CUSTOM CLASSIFIER
+# =========================
+x = base_model.output
+x = layers.Flatten()(x)
+x = layers.Dense(512, activation='relu')(x)
+x = layers.Dropout(0.5)(x)
+x = layers.Dense(256, activation='relu')(x)
+x = layers.Dropout(0.3)(x)
+output = layers.Dense(NUM_CLASSES, activation='softmax')(x)
+
+model = models.Model(inputs=base_model.input, outputs=output)
+
+# =========================
+# 6. COMPILE MODEL
+# =========================
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model.summary()
+
+# =========================
+# 7. CALLBACKS
+# =========================
+callbacks = [
+    tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=5,
+        restore_best_weights=True
+    ),
+    tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.3,
+        patience=3,
+        min_lr=1e-6
+    )
+]
+
+# =========================
+# 8. TRAINING (PHASE 1)
+# =========================
+history = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=15,
+    callbacks=callbacks
+)
+
+# =========================
+# 9. FINE-TUNING 🔥
+# =========================
+# Unfreeze last layers
+for layer in base_model.layers[-8:]:
+    layer.trainable = True
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+history_fine = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=20,
+    callbacks=callbacks
+)
+
+# =========================
+# 10. ACCURACY IN %
+# =========================
+train_acc = history_fine.history['accuracy'][-1]
+val_acc = history_fine.history['val_accuracy'][-1]
+
+print(f"\n Training Accuracy: {train_acc * 100:.2f}%")
+print(f" Validation Accuracy: {val_acc * 100:.2f}%")
+
+# =========================
+# 11. TEST ACCURACY
+# =========================
+loss, test_acc = model.evaluate(test_gen)
+
+print(f" Test Accuracy: {test_acc * 100:.2f}%")
+
+# =========================
+# 12. SAVE MODEL
+# =========================
+model.save("/content/vgg16_npdr_model.keras")
+
+print(" Model saved successfully!")
+
+
