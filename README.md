@@ -45,13 +45,17 @@ The model classifies retinal fundus images into:
 - ✅ No NPDR
 - ⚠️ Mild NPDR
 - ⚠️ Moderate NPDR
+
 - ⚠️ Severe NPDR
 - 🔴 Proliferative Diabetic Retinopathy
 
 with proper reason and its give report 
 
 ## 📸 Output
-
+<img width="1600" height="738" alt="1000036637" src="https://github.com/user-attachments/assets/38eb895c-ef6d-4e8c-9463-9f270088d0af" />
+<img width="1600" height="695" alt="1000036634" src="https://github.com/user-attachments/assets/425414e1-47b4-40bc-9865-5b8b52675d28" />
+<img width="1600" height="731" alt="1000036643" src="https://github.com/user-attachments/assets/2da0866b-e072-4cdb-a04a-f37efddf74ac" />
+<img width="1600" height="807" alt="1000036640" src="https://github.com/user-attachments/assets/1237a801-02ff-47c9-8559-210949dc0bbe" />
 ### Home Page
 ![Home Page](home.png)
 
